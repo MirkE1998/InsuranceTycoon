@@ -1,0 +1,22 @@
+-- ServerScriptService/AppointmentsData
+
+local Appointments = {
+	{
+		Id = 1,
+		Name = "Max Berger",
+		Job = "Gym Owner",
+		AvatarUserId = 12345678, -- Roblox UserId für Headshot
+		Status = "Scheduled",
+	},
+	{
+		Id = 2,
+		Name = "Laura Stein",
+		Job = "Physio Owner",
+		AvatarUserId = 87654321,
+		Status = "Scheduled",
+	},
+}
+
+return Appointments
+
+

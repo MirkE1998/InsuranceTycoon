@@ -1,0 +1,123 @@
+-- ServerScriptService/AppointmentService
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local AVATAR_POOL = { 1, 156, 261, 454, 623, 80254, 261392, 12345678 }
+
+-- =========================
+-- REMOTES SETUP (keep your original behavior)
+-- =========================
+local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotesFolder then
+	remotesFolder = Instance.new("Folder")
+	remotesFolder.Name = "Remotes"
+	remotesFolder.Parent = ReplicatedStorage
+end
+
+local function ensureRemoteEvent(name: string)
+	local obj = remotesFolder:FindFirstChild(name)
+	if obj and not obj:IsA("RemoteEvent") then
+		obj:Destroy()
+		obj = nil
+	end
+	if not obj then
+		obj = Instance.new("RemoteEvent")
+		obj.Name = name
+		obj.Parent = remotesFolder
+	end
+	return obj
+end
+
+local AppointmentAdded = ensureRemoteEvent("AppointmentAdded")
+local AppointmentClear = ensureRemoteEvent("AppointmentClear")
+
+-- =========================
+-- HELPERS
+-- =========================
+local function ensureAppointmentsFolder(plr: Player): Folder
+	local folder = plr:FindFirstChild("Appointments")
+	if folder and not folder:IsA("Folder") then
+		folder:Destroy()
+		folder = nil
+	end
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "Appointments"
+		folder.Parent = plr
+	end
+	return folder
+end
+
+-- ✅ SINGLE folderToApptTable (no duplicates)
+local function folderToApptTable(apptFolder: Folder)
+	if not apptFolder or not apptFolder:IsA("Folder") then
+		return nil
+	end
+
+	local function getValue(name)
+		local v = apptFolder:FindFirstChild(name)
+		return v and v.Value or nil
+	end
+
+	-- ✅ ensure persistent AvatarUserId stored in folder (so it stays consistent)
+	local avatarV = apptFolder:FindFirstChild("AvatarUserId")
+	if not avatarV then
+		avatarV = Instance.new("IntValue")
+		avatarV.Name = "AvatarUserId"
+		avatarV.Value = AVATAR_POOL[math.random(1, #AVATAR_POOL)]
+		avatarV.Parent = apptFolder
+	end
+
+	return {
+		Id = getValue("Id") or apptFolder.Name,
+		Name = getValue("Name") or "Unknown",
+		Job = getValue("Job") or "Unknown",
+		Status = getValue("Status") or "Scheduled",
+		AvatarUserId = avatarV.Value,
+		PortraitSeed = getValue("PortraitSeed"),
+	}
+end
+
+local function sendAllAppointmentsToPlayer(plr: Player)
+	local folder = ensureAppointmentsFolder(plr)
+
+	AppointmentClear:FireClient(plr)
+
+	for _, apptFolder in ipairs(folder:GetChildren()) do
+		if apptFolder:IsA("Folder") then
+			-- ✅ FIX: use apptFolder (not undefined "child")
+			local data = folderToApptTable(apptFolder)
+			if data then
+				AppointmentAdded:FireClient(plr, data)
+			end
+		end
+	end
+end
+
+local function hookLiveUpdates(plr: Player)
+	local folder = ensureAppointmentsFolder(plr)
+
+	task.wait(0.5)
+	sendAllAppointmentsToPlayer(plr)
+
+	folder.ChildAdded:Connect(function(child)
+		if not child:IsA("Folder") then return end
+		task.wait() -- allow values to be created
+
+		local data = folderToApptTable(child)
+		if data then
+			AppointmentAdded:FireClient(plr, data)
+		end
+	end)
+end
+
+Players.PlayerAdded:Connect(function(plr)
+	task.spawn(hookLiveUpdates, plr)
+end)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+	task.spawn(hookLiveUpdates, plr)
+end
+
+print("[AppointmentService] Ready. Remotes:", remotesFolder:GetFullName())

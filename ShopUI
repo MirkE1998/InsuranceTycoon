@@ -1,0 +1,42 @@
+local gui = script.Parent
+local shopButton = gui:WaitForChild("ShopButton")
+local shopFrame = gui:WaitForChild("ShopFrame")
+local closeButton = shopFrame:WaitForChild("CloseButton")
+
+local function openShop()
+	shopFrame.Visible = true
+end
+
+local function closeShop()
+	shopFrame.Visible = false
+end
+
+shopButton.MouseButton1Click:Connect(function()
+	if shopFrame.Visible then
+		closeShop()
+	else
+		openShop()
+	end
+end)
+
+closeButton.MouseButton1Click:Connect(closeShop)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local BuyItem = Remotes:WaitForChild("BuyItem")
+
+-- Beispiel: direkt im Template
+for _, item in pairs(shopFrame.ItemsContainer:GetChildren()) do
+	if item:IsA("Frame") and item.Name == "ItemTemplate" then
+		local buyButton = item:WaitForChild("BuyButton")
+		local itemName = item:WaitForChild("ItemName")
+
+		buyButton.MouseButton1Click:Connect(function()
+			if itemName.Text == "Secret Sales Script" then
+				BuyItem:FireServer("SecretSalesScript")
+				buyButton.Text = "Owned"
+				buyButton.Active = false
+			end
+		end)
+	end
+end
+

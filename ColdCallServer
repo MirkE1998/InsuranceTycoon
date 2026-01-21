@@ -1,0 +1,162 @@
+-- ColdCallServer (ServerScriptService)
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+math.randomseed(os.clock())
+
+-- ===== Config =====
+local APPOINTMENT_CHANCE = 0.30
+local COOLDOWN_SEC = 1.25
+local MAX_APPOINTMENTS = 12
+
+local NAMES = {
+	"Alex","Mila","Noah","Lea","Emir","Lina","Jonas","Nora","Elias","Yara","Sami","Oskar"
+}
+
+local JOBS = {
+	"Electrician","Physiotherapist","Office Manager","Dental Assistant","Fitness Trainer",
+	"Software Developer","Hairdresser","Police Officer","Teacher","Auto Mechanic","Sales Associate","Baker"
+}
+
+-- Random Roblox face image asset ids (these are common classic faces)
+-- You can replace/add more if you want.
+local FACE_IDS = {
+	7074764,   -- Smile
+	7074786,   -- Classic Female
+	7074944,   -- Man
+	7074964,   -- Check It
+	7076056,   -- O_o
+	7076105,   -- :3
+	7076171,   -- Big Grin
+	7077444,   -- Drool
+	7075461,   -- Chill
+	7074661,   -- Default-ish
+}
+
+-- ===== Remotes =====
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local ColdCallFeedback = Remotes:WaitForChild("ColdCallFeedback")
+
+-- ===== World refs =====
+local phoneModel = workspace:WaitForChild("Phone")
+local telephone = phoneModel:WaitForChild("Telephone")
+local prompt = telephone:WaitForChild("ProximityPrompt")
+
+-- ===== Helpers =====
+local lastCallAt = {}
+
+local function ensurePlayerFolders(player)
+	-- PlayerData/Cash
+	local data = player:FindFirstChild("PlayerData")
+	if not data then
+		data = Instance.new("Folder")
+		data.Name = "PlayerData"
+		data.Parent = player
+	end
+
+	local cash = data:FindFirstChild("Cash")
+	if not cash then
+		cash = Instance.new("IntValue")
+		cash.Name = "Cash"
+		cash.Value = 100
+		cash.Parent = data
+	end
+
+	-- Appointments
+	local appts = player:FindFirstChild("Appointments")
+	if not appts then
+		appts = Instance.new("Folder")
+		appts.Name = "Appointments"
+		appts.Parent = player
+	end
+
+	return appts
+end
+
+local function newId()
+	return ("%d_%d"):format(os.time(), math.random(10000, 99999))
+end
+
+local function pick(list)
+	return list[math.random(1, #list)]
+end
+
+local function createAppointment(player)
+	local appts = ensurePlayerFolders(player)
+
+	if #appts:GetChildren() >= MAX_APPOINTMENTS then
+		return false, "Your appointment list is full."
+	end
+
+	local id = newId()
+	local name = pick(NAMES)
+	local job = pick(JOBS)
+	local seed = math.random(1, 999999)
+	local faceId = pick(FACE_IDS)
+
+	local folder = Instance.new("Folder")
+	folder.Name = "Appt_" .. id
+	folder.Parent = appts
+
+	local vId = Instance.new("StringValue")
+	vId.Name = "Id"
+	vId.Value = id
+	vId.Parent = folder
+
+	local vName = Instance.new("StringValue")
+	vName.Name = "Name"
+	vName.Value = name
+	vName.Parent = folder
+
+	local vJob = Instance.new("StringValue")
+	vJob.Name = "Job"
+	vJob.Value = job
+	vJob.Parent = folder
+
+	local vStatus = Instance.new("StringValue")
+	vStatus.Name = "Status"
+	vStatus.Value = "Scheduled"
+	vStatus.Parent = folder
+
+	local vSeed = Instance.new("IntValue")
+	vSeed.Name = "PortraitSeed"
+	vSeed.Value = seed
+	vSeed.Parent = folder
+
+	local vFace = Instance.new("IntValue")
+	vFace.Name = "FaceId"
+	vFace.Value = faceId
+	vFace.Parent = folder
+
+	return true, (name .. " (" .. job .. ")")
+end
+
+Players.PlayerAdded:Connect(function(player)
+	ensurePlayerFolders(player)
+end)
+
+prompt.Triggered:Connect(function(player)
+	local now = os.clock()
+	if lastCallAt[player] and (now - lastCallAt[player]) < COOLDOWN_SEC then
+		return
+	end
+	lastCallAt[player] = now
+
+	ensurePlayerFolders(player)
+
+	if math.random() <= APPOINTMENT_CHANCE then
+		local ok, info = createAppointment(player)
+		if ok then
+			ColdCallFeedback:FireClient(player, "success", "Appointment booked: " .. info)
+		else
+			ColdCallFeedback:FireClient(player, "fail", info)
+		end
+	else
+		ColdCallFeedback:FireClient(player, "fail", "No answer. Try again.")
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	lastCallAt[player] = nil
+end)

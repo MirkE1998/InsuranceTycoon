@@ -1,0 +1,220 @@
+-- ServerScriptService/ConsultPCServer
+-- Hold F on ConsultPrompt -> remove oldest appointment -> pay 200-1000 -> refresh UI
+-- NOTE: NO loop sound here. Loop sound must be client-side (PromptButtonHoldBegan/Ended).
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+math.randomseed(os.clock())
+
+-- ===== Config =====
+local COOLDOWN_SEC = 1.25
+local HOLD_SECONDS = 3
+
+local PAY_MIN = 200
+local PAY_MAX = 1000
+
+local PC_MODEL_NAME = "PC"
+local PROMPT_NAME = "ConsultPrompt"
+
+-- ===== Remotes (same style as your services) =====
+local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotesFolder then
+	remotesFolder = Instance.new("Folder")
+	remotesFolder.Name = "Remotes"
+	remotesFolder.Parent = ReplicatedStorage
+end
+
+local function ensureRemoteEvent(name: string)
+	local obj = remotesFolder:FindFirstChild(name)
+	if obj and not obj:IsA("RemoteEvent") then
+		obj:Destroy()
+		obj = nil
+	end
+	if not obj then
+		obj = Instance.new("RemoteEvent")
+		obj.Name = name
+		obj.Parent = remotesFolder
+	end
+	return obj
+end
+
+local AppointmentAdded = ensureRemoteEvent("AppointmentAdded")
+local AppointmentClear = ensureRemoteEvent("AppointmentClear")
+local ConsultFeedback = ensureRemoteEvent("ConsultFeedback") -- optional client success/fail
+
+-- ===== World refs =====
+local pcModel = workspace:WaitForChild(PC_MODEL_NAME)
+
+local prompt = pcModel:FindFirstChild(PROMPT_NAME, true)
+if not prompt or not prompt:IsA("ProximityPrompt") then
+	error(("[ConsultPCServer] No ProximityPrompt named '%s' found inside Workspace.%s"):format(PROMPT_NAME, PC_MODEL_NAME))
+end
+
+-- ProximityPrompt must be under a BasePart or Attachment
+local function ensurePromptParentedToPart(p: ProximityPrompt, model: Model)
+	local parent = p.Parent
+	if parent and (parent:IsA("BasePart") or parent:IsA("Attachment")) then
+		return
+	end
+
+	local targetPart = model.PrimaryPart
+	if not targetPart then
+		targetPart = model:FindFirstChildWhichIsA("BasePart", true)
+	end
+	if not targetPart then
+		error("[ConsultPCServer] PC model has no BasePart. Add a Part/MeshPart inside PC.")
+	end
+
+	p.Parent = targetPart
+	print("[ConsultPCServer] Reparented prompt to:", targetPart:GetFullName())
+end
+
+ensurePromptParentedToPart(prompt, pcModel)
+
+-- Prompt settings
+prompt.Enabled = true
+prompt.HoldDuration = HOLD_SECONDS
+prompt.RequiresLineOfSight = false
+prompt.ActionText = "Consult"
+prompt.ObjectText = "PC"
+prompt.KeyboardKeyCode = Enum.KeyCode.F
+prompt.MaxActivationDistance = math.max(prompt.MaxActivationDistance, 12)
+
+print("[ConsultPCServer] Ready. Using prompt:", prompt:GetFullName())
+
+-- ===== Helpers =====
+local lastUseAt = {}
+
+local function ensurePlayerData(plr: Player): Folder
+	local data = plr:FindFirstChild("PlayerData")
+	if data and not data:IsA("Folder") then
+		data:Destroy()
+		data = nil
+	end
+	if not data then
+		data = Instance.new("Folder")
+		data.Name = "PlayerData"
+		data.Parent = plr
+	end
+	return data
+end
+
+local function ensureCash(plr: Player): IntValue
+	local data = ensurePlayerData(plr)
+	local cash = data:FindFirstChild("Cash")
+	if cash and not cash:IsA("IntValue") then
+		cash:Destroy()
+		cash = nil
+	end
+	if not cash then
+		cash = Instance.new("IntValue")
+		cash.Name = "Cash"
+		cash.Value = 100
+		cash.Parent = data
+	end
+	return cash
+end
+
+local function ensureAppointmentsFolder(plr: Player): Folder
+	local folder = plr:FindFirstChild("Appointments")
+	if folder and not folder:IsA("Folder") then
+		folder:Destroy()
+		folder = nil
+	end
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "Appointments"
+		folder.Parent = plr
+	end
+	return folder
+end
+
+local function folderToApptTable(apptFolder: Folder)
+	local function getValue(name)
+		local v = apptFolder:FindFirstChild(name)
+		return v and v.Value or nil
+	end
+
+	local avatarV = apptFolder:FindFirstChild("AvatarUserId")
+	local avatarUserId = avatarV and avatarV.Value or nil
+
+	return {
+		Id = getValue("Id") or apptFolder.Name,
+		Name = getValue("Name") or "Unknown",
+		Job = getValue("Job") or "Unknown",
+		Status = getValue("Status") or "Scheduled",
+		AvatarUserId = avatarUserId,
+		PortraitSeed = getValue("PortraitSeed"),
+		FaceId = getValue("FaceId"),
+	}
+end
+
+local function refreshAppointmentsUI(player: Player, apptsFolder: Folder)
+	AppointmentClear:FireClient(player)
+	for _, apptFolder in ipairs(apptsFolder:GetChildren()) do
+		if apptFolder:IsA("Folder") then
+			AppointmentAdded:FireClient(player, folderToApptTable(apptFolder))
+		end
+	end
+end
+
+local function getOldestAppointment(appts: Folder): Folder?
+	local folders = {}
+	for _, child in ipairs(appts:GetChildren()) do
+		if child:IsA("Folder") then
+			table.insert(folders, child)
+		end
+	end
+	if #folders == 0 then return nil end
+
+	local function ts(folder: Folder)
+		local idV = folder:FindFirstChild("Id")
+		local idStr = idV and tostring(idV.Value) or folder.Name
+		return tonumber(idStr:match("^(%d+)_")) or math.huge
+	end
+
+	table.sort(folders, function(a, b)
+		local ta, tb = ts(a), ts(b)
+		if ta ~= tb then
+			return ta < tb
+		end
+		return a.Name < b.Name
+	end)
+
+	return folders[1]
+end
+
+-- ===== Main =====
+prompt.Triggered:Connect(function(player: Player)
+	local now = os.clock()
+	if lastUseAt[player] and (now - lastUseAt[player]) < COOLDOWN_SEC then
+		return
+	end
+	lastUseAt[player] = now
+
+	local appts = ensureAppointmentsFolder(player)
+	local oldest = getOldestAppointment(appts)
+
+	if not oldest then
+		ConsultFeedback:FireClient(player, "fail", "No appointments to consult.")
+		warn("[ConsultPCServer] No appointments for:", player.Name)
+		return
+	end
+
+	local removedName = oldest.Name
+	oldest:Destroy()
+
+	local cash = ensureCash(player)
+	local reward = math.random(PAY_MIN, PAY_MAX)
+	cash.Value += reward
+
+	refreshAppointmentsUI(player, appts)
+	ConsultFeedback:FireClient(player, "success", ("Consult complete: +$%d"):format(reward))
+
+	print(("[ConsultPCServer] %s consulted. Removed %s. +$%d"):format(player.Name, removedName, reward))
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	lastUseAt[player] = nil
+end)

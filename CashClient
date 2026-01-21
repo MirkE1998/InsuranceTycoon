@@ -1,0 +1,27 @@
+-- CashClient (LocalScript)
+-- Updates CashUI to show current total cash as "$1234"
+
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local label = script.Parent -- CashAmountLabel
+
+-- Wait for PlayerData and Cash
+local function getCashValue()
+	local data = player:WaitForChild("PlayerData")
+	local cash = data:WaitForChild("Cash")
+	return cash
+end
+
+local cashValue = getCashValue()
+
+local function updateText()
+	label.Text = "$" .. tostring(cashValue.Value)
+end
+
+-- Initial update
+updateText()
+
+-- Update whenever cash changes
+cashValue:GetPropertyChangedSignal("Value"):Connect(updateText)
+

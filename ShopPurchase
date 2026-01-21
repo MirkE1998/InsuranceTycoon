@@ -1,0 +1,28 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+local BuyItem = Instance.new("RemoteEvent")
+BuyItem.Name = "BuyItem"
+BuyItem.Parent = Remotes
+
+Players.PlayerAdded:Connect(function(player)
+	local perks = Instance.new("Folder")
+	perks.Name = "Perks"
+	perks.Parent = player
+
+	local secretScript = Instance.new("BoolValue")
+	secretScript.Name = "SecretSalesScript"
+	secretScript.Value = false
+	secretScript.Parent = perks
+end)
+
+BuyItem.OnServerEvent:Connect(function(player, itemId)
+	if itemId == "SecretSalesScript" then
+		local perk = player.Perks:FindFirstChild("SecretSalesScript")
+		if perk then
+			perk.Value = true
+		end
+	end
+end)

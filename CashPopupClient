@@ -1,0 +1,48 @@
+-- CashPopupClient (LocalScript)
+-- Shows +$X popup when cash increases
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local frame = script.Parent
+
+	local popup = frame:WaitForChild("CashPopup")
+local cashSound = frame:WaitForChild("CashSound")
+
+local cashValue = player:WaitForChild("PlayerData"):WaitForChild("Cash")
+
+local lastCash = cashValue.Value
+
+cashValue:GetPropertyChangedSignal("Value"):Connect(function()
+	local current = cashValue.Value
+	if current > lastCash then
+		local gained = current - lastCash
+
+		-- Update popup text
+		popup.Text = "+$" .. gained
+		popup.Visible = true
+		popup.TextTransparency = 0
+		popup.Position = UDim2.fromScale(0.5, 0.4)
+
+		-- Play sound (same timing)
+		cashSound:Play()
+
+		-- Tween up + fade
+		TweenService:Create(
+			popup,
+			TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{
+				Position = UDim2.fromScale(0.5, 0.3),
+				TextTransparency = 1
+			}
+		):Play()
+
+		task.delay(0.6, function()
+			popup.Visible = false
+		end)
+	end
+
+	lastCash = current
+end)
+

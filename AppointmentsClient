@@ -1,0 +1,264 @@
+-- AppointmentsClient (LocalScript)
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local screenGui = script.Parent
+
+-- UI References
+local mainFrame = screenGui:WaitForChild("MainFrame")
+local list = mainFrame:WaitForChild("List")
+local template = screenGui:WaitForChild("AppointmentItem")
+
+-- Remotes
+local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
+local AppointmentAdded = remotesFolder:WaitForChild("AppointmentAdded")
+local AppointmentClear = remotesFolder:WaitForChild("AppointmentClear")
+
+-- Make ZIndex actually matter
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+
+-- ===== Scroll Setup =====
+list.ScrollingDirection = Enum.ScrollingDirection.Y
+list.ScrollBarThickness = 6
+list.Active = true
+
+local layout = list:FindFirstChildOfClass("UIListLayout")
+if layout then
+	local function updateCanvas()
+		list.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
+	end
+	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
+	updateCanvas()
+end
+
+-- ===== Selection State =====
+local selectedAppointmentId = nil
+
+-- ===== Colors =====
+local COLOR_DEFAULT = Color3.fromRGB(38, 38, 38)
+local COLOR_SELECTED = Color3.fromRGB(46, 155, 92)
+local COLOR_STROKE = Color3.fromRGB(255, 255, 255)
+
+-- ===== Click Sound =====
+local clickSound = Instance.new("Sound")
+clickSound.Name = "UI_Click"
+clickSound.SoundId = "rbxassetid://12221967"
+clickSound.Volume = 0.6
+clickSound.Parent = screenGui
+
+local function playClick()
+	clickSound:Play()
+end
+
+-- ===== UI Helpers =====
+local function ensureCorner(obj, radius)
+	local c = obj:FindFirstChildOfClass("UICorner")
+	if not c then
+		c = Instance.new("UICorner")
+		c.Parent = obj
+	end
+	c.CornerRadius = UDim.new(0, radius)
+end
+
+local function ensureStroke(obj, transparency)
+	local s = obj:FindFirstChildOfClass("UIStroke")
+	if not s then
+		s = Instance.new("UIStroke")
+		s.Parent = obj
+	end
+	s.Color = COLOR_STROKE
+	s.Thickness = 1
+	s.Transparency = transparency
+end
+
+local function clearList()
+	for _, child in ipairs(list:GetChildren()) do
+		if child:IsA("Frame") and child.Name == "AppointmentItemClone" then
+			child:Destroy()
+		end
+	end
+end
+
+local function forceCardFormatting(item)
+	item.Size = UDim2.new(1, -20, 0, 72)
+	item.BackgroundColor3 = COLOR_DEFAULT
+	item.BackgroundTransparency = 0
+	item.BorderSizePixel = 0
+	item.Active = false
+
+	ensureCorner(item, 14)
+	ensureStroke(item, 0.85)
+
+	-- Make labels/images not block input
+	for _, d in ipairs(item:GetDescendants()) do
+		if d:IsA("TextLabel") then
+			d.BackgroundTransparency = 1
+			d.TextColor3 = Color3.fromRGB(235, 235, 235)
+			d.Active = false
+		elseif d:IsA("ImageLabel") then
+			d.BackgroundTransparency = 1
+			d.Active = false
+		elseif d:IsA("Frame") then
+			d.Active = false
+		end
+	end
+end
+
+local function applySelectionVisuals()
+	for _, child in ipairs(list:GetChildren()) do
+		if child:IsA("Frame") and child.Name == "AppointmentItemClone" then
+			local apptId = child:GetAttribute("ApptId")
+			if apptId == selectedAppointmentId then
+				child.BackgroundColor3 = COLOR_SELECTED
+			else
+				child.BackgroundColor3 = COLOR_DEFAULT
+			end
+		end
+	end
+end
+
+local function setAvatarImage(avatarImageLabel, data)
+	local faceId = tonumber(data.FaceId)
+	if faceId then
+		avatarImageLabel.Image = "rbxassetid://" .. tostring(faceId)
+	end
+end
+
+-- ✅ GUARANTEED CLICK: creates an invisible TextButton overlay on top of any GuiObject
+local function ensureClickOverlay(targetGuiObject)
+	if not targetGuiObject or not targetGuiObject:IsA("GuiObject") then
+		return nil
+	end
+
+	-- If there's already a real GuiButton, use it
+	if targetGuiObject:IsA("GuiButton") then
+		targetGuiObject.Active = true
+		targetGuiObject.Selectable = true
+		targetGuiObject.AutoButtonColor = true
+		return targetGuiObject
+	end
+
+	-- Otherwise create an overlay
+	local overlay = targetGuiObject:FindFirstChild("ClickOverlay")
+	if overlay and overlay:IsA("TextButton") then
+		return overlay
+	end
+
+	overlay = Instance.new("TextButton")
+	overlay.Name = "ClickOverlay"
+	overlay.BackgroundTransparency = 1
+	overlay.Text = "" -- invisible
+	overlay.AutoButtonColor = false
+	overlay.Active = true
+	overlay.Selectable = true
+	overlay.Size = UDim2.new(1, 0, 1, 0)
+	overlay.Position = UDim2.new(0, 0, 0, 0)
+	overlay.ZIndex = (targetGuiObject.ZIndex or 1) + 50
+	overlay.Parent = targetGuiObject
+
+	return overlay
+end
+
+local function forceZIndex(item, clickable)
+	item.ZIndex = 10
+	for _, d in ipairs(item:GetDescendants()) do
+		if d:IsA("GuiObject") then
+			d.ZIndex = 11
+		end
+	end
+	if clickable and clickable:IsA("GuiObject") then
+		clickable.ZIndex = 100
+	end
+end
+
+local function createItem(data)
+	if typeof(data) ~= "table" then return end
+
+	local item = template:Clone()
+	item.Name = "AppointmentItemClone"
+	item.Visible = true
+	item.Parent = list
+
+	item:SetAttribute("ApptId", tostring(data.Id or item.Name))
+
+	forceCardFormatting(item)
+
+	-- Refs
+	local avatar = item:WaitForChild("Avatar")
+	local nameLabel = item:WaitForChild("CustomerName")
+	local jobLabel = item:WaitForChild("Job")
+	local statusLabel = item:WaitForChild("Status")
+
+	-- Button target (can be anything)
+	local target = item:FindFirstChild("SelectButton") or item:FindFirstChild("Button")
+	if not target then
+		warn("No SelectButton/Button found inside AppointmentItem template.")
+		return
+	end
+
+	-- If it IS a TextButton, set the text. If it's not, we don't touch it.
+	if target:IsA("TextButton") then
+		target.Text = "Consult"
+		target.TextColor3 = Color3.fromRGB(220, 220, 220)
+	end
+
+	-- Avatar round
+	if avatar and avatar:IsA("ImageLabel") then
+		ensureCorner(avatar, 999)
+	end
+
+	-- Text
+	nameLabel.Text = tostring(data.Name or "Unknown")
+	jobLabel.Text = tostring(data.Job or "Unknown")
+	statusLabel.Text = tostring(data.Status or "Scheduled")
+
+	setAvatarImage(avatar, data)
+
+	-- ✅ Make it clickable no matter what target is
+	local clickable = ensureClickOverlay(target)
+
+	-- ZIndex lock
+	forceZIndex(item, clickable)
+
+	-- Click = select
+	if clickable then
+		clickable.Activated:Connect(function()
+			selectedAppointmentId = tostring(data.Id)
+			playClick()
+			applySelectionVisuals()
+		end)
+	end
+
+	applySelectionVisuals()
+end
+
+-- ===== Remote Events =====
+AppointmentClear.OnClientEvent:Connect(function()
+	clearList()
+	selectedAppointmentId = nil
+end)
+
+AppointmentAdded.OnClientEvent:Connect(function(data)
+	createItem(data)
+end)
+
+-- ===== Manual Scroll (unchanged) =====
+UserInputService.InputChanged:Connect(function(input, gpe)
+	if gpe then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
+
+	local mouse = UserInputService:GetMouseLocation()
+	local pos = list.AbsolutePosition
+	local size = list.AbsoluteSize
+
+	if mouse.X >= pos.X and mouse.X <= pos.X + size.X
+		and mouse.Y >= pos.Y and mouse.Y <= pos.Y + size.Y then
+		list.CanvasPosition = Vector2.new(
+			0,
+			math.max(0, list.CanvasPosition.Y - input.Position.Z * 40)
+		)
+	end
+end)

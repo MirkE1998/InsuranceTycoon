@@ -1,0 +1,55 @@
+-- ConsultSoundClient (LocalScript)
+-- Plays SFX_ConsultLoop ONLY while holding F on ConsultPrompt (found recursively).
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+-- ===== Names (must match your Explorer) =====
+local PC_MODEL_NAME = "PC"
+local PROMPT_NAME = "ConsultPrompt"
+local LOOP_SOUND_NAME = "SFX_ConsultLoop"
+
+local pcModel = workspace:WaitForChild(PC_MODEL_NAME)
+
+-- Find prompt recursively (fixes your PC.PC.ConsultPrompt structure)
+local prompt = pcModel:WaitForChild(PROMPT_NAME, true)
+if not prompt:IsA("ProximityPrompt") then
+	warn("[ConsultSoundClient] '" .. PROMPT_NAME .. "' found but is not a ProximityPrompt:", prompt.ClassName)
+	return
+end
+
+-- Find loop sound recursively
+local sfxLoop = pcModel:FindFirstChild(LOOP_SOUND_NAME, true)
+if not sfxLoop or not sfxLoop:IsA("Sound") then
+	warn("[ConsultSoundClient] Sound '" .. LOOP_SOUND_NAME .. "' not found inside PC.")
+	return
+end
+
+sfxLoop.Looped = true
+sfxLoop.Playing = false
+
+local function stopLoop()
+	if sfxLoop.IsPlaying then
+		sfxLoop:Stop()
+	end
+end
+
+print("[ConsultSoundClient] Ready.")
+print("Prompt:", prompt:GetFullName())
+print("Sound :", sfxLoop:GetFullName())
+
+prompt.PromptButtonHoldBegan:Connect(function(plr)
+	if plr ~= player then return end
+	if not sfxLoop.IsPlaying then
+		sfxLoop:Play()
+	end
+end)
+
+prompt.PromptButtonHoldEnded:Connect(function(plr)
+	if plr ~= player then return end
+	stopLoop()
+end)
+
+player.CharacterAdded:Connect(function()
+	stopLoop()
+end)

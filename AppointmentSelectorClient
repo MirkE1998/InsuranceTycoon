@@ -1,0 +1,97 @@
+-- AppointmentSelectorClient (LocalScript)
+-- Select appointment cards by manual hit-test (no buttons needed).
+-- Click anywhere on a card inside MainFrame/List -> turns green + plays click sound.
+
+local UserInputService = game:GetService("UserInputService")
+
+local screenGui = script.Parent
+local mainFrame = screenGui:WaitForChild("MainFrame")
+local list = mainFrame:WaitForChild("List")
+
+-- Colors
+local COLOR_DEFAULT = Color3.fromRGB(38, 38, 38)
+local COLOR_SELECTED = Color3.fromRGB(46, 155, 92)
+
+-- Click sound (manual option: place Sound named UI_Click under AppointmentsUI to control it)
+local clickSound = screenGui:FindFirstChild("UI_Click")
+if not clickSound then
+	clickSound = Instance.new("Sound")
+	clickSound.Name = "UI_Click"
+	clickSound.SoundId = "rbxassetid://12221967"
+	clickSound.Volume = 0.6
+	clickSound.Parent = screenGui
+end
+
+local selectedCard: Frame? = nil
+
+local function setSelectedVisual(card: Frame, isSelected: boolean)
+	-- If you add a manual overlay frame named SelectedGlow inside the card, we use that
+	local glow = card:FindFirstChild("SelectedGlow", true)
+	if glow and glow:IsA("Frame") then
+		glow.Visible = isSelected
+	else
+		card.BackgroundTransparency = 0
+		card.BorderSizePixel = 0
+		card.BackgroundColor3 = isSelected and COLOR_SELECTED or COLOR_DEFAULT
+	end
+end
+
+local function refreshAll()
+	for _, child in ipairs(list:GetChildren()) do
+		if child:IsA("Frame") then
+			setSelectedVisual(child, child == selectedCard)
+		end
+	end
+end
+
+local function isPointInside(guiObject: GuiObject, x: number, y: number): boolean
+	local pos = guiObject.AbsolutePosition
+	local size = guiObject.AbsoluteSize
+	return (x >= pos.X and x <= pos.X + size.X and y >= pos.Y and y <= pos.Y + size.Y)
+end
+
+-- Find the top-most card under the mouse (iterate from last to first for Z-ish behavior)
+local function findCardUnderMouse(x: number, y: number): Frame?
+	local children = list:GetChildren()
+	for i = #children, 1, -1 do
+		local child = children[i]
+		if child:IsA("Frame") and child.Visible then
+			-- Only treat frames that look like appointment cards (avoid UIListLayout etc)
+			local hasName = child:FindFirstChild("CustomerName", true)
+			local hasJob = child:FindFirstChild("Job", true)
+			local hasStatus = child:FindFirstChild("Status", true)
+			if hasName and hasJob and hasStatus then
+				if isPointInside(child, x, y) then
+					return child
+				end
+			end
+		end
+	end
+	return nil
+end
+
+print("[SelectorHitTest] Ready. Click any appointment card in List.")
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+	if gpe then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+
+	local mousePos = UserInputService:GetMouseLocation()
+	local x, y = mousePos.X, mousePos.Y
+
+	-- Only react if click happened inside the list area
+	if not isPointInside(list, x, y) then
+		return
+	end
+
+	local card = findCardUnderMouse(x, y)
+	if not card then
+		return
+	end
+
+	selectedCard = card
+	clickSound:Play()
+	refreshAll()
+
+	print("[SelectorHitTest] Selected card:", card:GetFullName())
+end)
